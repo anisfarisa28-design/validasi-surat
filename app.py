@@ -5,6 +5,9 @@ from spellchecker import SpellChecker
 import pandas as pd
 import re
 from docx import Document
+import pytesseract
+from pdf2image import convert_from_bytes
+from PIL import Image
 
 app = Flask(__name__)
 
@@ -13,6 +16,9 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
+
+# 🔥 SET PATH TESSERACT
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 # LOAD EXCEL
 data_pegawai = pd.read_excel("data_pegawai.xlsx")
@@ -23,29 +29,30 @@ def bersihkan_nama(teks):
     teks = re.sub(r'[^a-z\s]', '', teks)
     return teks.strip()
 
-# 🔥 AMBIL SEMUA TEKS (SUPER LENGKAP)
-def extract_all_text(file):
+# 🔥 DOCX NORMAL
+def extract_docx_text(file):
     doc = Document(io.BytesIO(file.read()))
     texts = []
 
-    # paragraf biasa
     for p in doc.paragraphs:
         texts.append(p.text)
 
-    # tabel
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 texts.append(cell.text)
 
-    # header & footer
-    for section in doc.sections:
-        for p in section.header.paragraphs:
-            texts.append(p.text)
-        for p in section.footer.paragraphs:
-            texts.append(p.text)
-
     return "\n".join(texts)
+
+# 🔥 OCR (UNTUK TEXTBOX)
+def extract_with_ocr(file_bytes):
+    images = convert_from_bytes(file_bytes)
+    text = ""
+
+    for img in images:
+        text += pytesseract.image_to_string(img)
+
+    return text
 
 
 @app.route("/")
@@ -60,8 +67,20 @@ def cek():
     if file.filename == '':
         return "Tidak ada file dipilih"
 
-    # 🔥 AMBIL SEMUA ISI WORD
-    full_text = extract_all_text(file)
+    file_bytes = file.read()
+
+    # 🔥 1. COBA BACA NORMAL
+    try:
+        full_text = extract_docx_text(io.BytesIO(file_bytes))
+    except:
+        full_text = ""
+
+    # 🔥 2. TAMBAH OCR (BIAR TEXTBOX KEAMBIL)
+    try:
+        ocr_text = extract_with_ocr(file_bytes)
+        full_text += "\n" + ocr_text
+    except:
+        pass
 
     text_lower = full_text.lower()
     text_bersih = bersihkan_nama(full_text)
